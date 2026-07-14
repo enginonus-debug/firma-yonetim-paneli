@@ -45,9 +45,12 @@ export async function POST(istek: Request, { params }: Baglam) {
 
   const teklif = await prisma.teklif.findFirst({
     where: { id, firmaId },
-    select: { id: true, baslik: true, _count: { select: { ekler: true } } },
+    select: { id: true, baslik: true, durum: true, _count: { select: { ekler: true } } },
   });
   if (!teklif) return hata("Teklif bulunamadı", 404);
+  if (teklif.durum !== "onay_bekliyor") {
+    return hata("Karara bağlanmış teklife ek eklenemez", 409);
+  }
   if (teklif._count.ekler >= TEKLIF_EK_MAKS_ADET) {
     return hata(`Bir teklife en fazla ${TEKLIF_EK_MAKS_ADET} ek eklenebilir`, 409);
   }

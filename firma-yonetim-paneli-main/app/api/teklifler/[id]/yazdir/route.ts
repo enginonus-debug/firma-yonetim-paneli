@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { yetki } from "@/lib/yetki";
 import { hata, idAl } from "@/lib/api";
-import type { TeklifKalem } from "@/lib/teklif";
+import type { TeklifAnlikVeri, TeklifKalem } from "@/lib/teklif";
 
 // GET /api/teklifler/:id/yazdir — teklifi bağımsız, yazdırılabilir HTML belgesi
 // olarak döndürür. Tarayıcıdan "PDF olarak kaydet" ile PDF, "sayfayı kaydet" ile
@@ -24,8 +24,13 @@ export async function GET(_istek: Request, baglam: { params: Promise<{ id: strin
   });
   if (!teklif) return hata("Teklif bulunamadı", 404);
 
-  const firma = await prisma.firma.findUnique({ where: { id: firmaId } });
-  const musteri = teklif.satisFirsati.musteri;
+  // Karara bağlanmış teklif, karar anında dondurulan kopyadan (anlikVeri) beslenir;
+  // firma/müşteri bilgileri sonradan değişse bile onaylı belge değişmez.
+  const anlik = (teklif.anlikVeri as TeklifAnlikVeri | null) ?? null;
+  const firma = anlik?.firma ?? (await prisma.firma.findUnique({ where: { id: firmaId } }));
+  const musteri = anlik?.musteri ?? teklif.satisFirsati.musteri;
+  const olusturanAd = anlik ? anlik.olusturanAd : (teklif.olusturan?.adSoyad ?? null);
+  const onaylayanAd = anlik ? anlik.onaylayanAd : (teklif.onaylayan?.adSoyad ?? null);
   const kalemler = (teklif.kalemler as unknown as TeklifKalem[]) ?? [];
 
   const tl = (n: number) =>
@@ -58,7 +63,9 @@ export async function GET(_istek: Request, baglam: { params: Promise<{ id: strin
 
   const araToplam = Number(teklif.araToplam);
   const kdvOrani = Number(teklif.kdvOrani);
-  const kdvTutar = Number(teklif.toplam) - araToplam;
+  const iskontoOrani = Number(teklif.iskontoOrani);
+  const iskontoTutar = Math.round(araToplam * iskontoOrani) / 100;
+  const kdvTutar = Number(teklif.toplam) - (araToplam - iskontoTutar);
 
   const html = `<!doctype html>
 <html lang="tr">
@@ -112,7 +119,7 @@ export async function GET(_istek: Request, baglam: { params: Promise<{ id: strin
     </div>
     <div class="sag">
       <div style="font-size:20px;font-weight:700">FİYAT TEKLİFİ</div>
-      <div class="kucuk">Teklif No: #${teklif.id}<br/>Tarih: ${tarih(teklif.olusturma)}</div>
+      <div class="kucuk">Teklif No: #${teklif.id}${teklif.revizyonNo > 0 ? ` · Revizyon ${teklif.revizyonNo}` : ""}<br/>Tarih: ${tarih(teklif.olusturma)}</div>
       <div style="margin-top:8px" class="rozet b-${teklif.durum}">${durumEtiket[teklif.durum] ?? teklif.durum}</div>
     </div>
   </div>
@@ -133,8 +140,8 @@ export async function GET(_istek: Request, baglam: { params: Promise<{ id: strin
       <h3>Teklif Bilgileri</h3>
       <span class="kucuk">
         Geçerlilik: ${tarih(teklif.gecerlilikTarihi)}<br/>
-        Hazırlayan: ${kac(teklif.olusturan?.adSoyad ?? "—")}<br/>
-        Onaylayan: ${kac(teklif.onaylayan?.adSoyad ?? "—")}
+        Hazırlayan: ${kac(olusturanAd ?? "—")}<br/>
+        Onaylayan: ${kac(onaylayanAd ?? "—")}
       </span>
     </div>
   </div>
@@ -155,6 +162,7 @@ export async function GET(_istek: Request, baglam: { params: Promise<{ id: strin
 
   <div class="toplamlar">
     <div><span>Ara Toplam</span><span>${tl(araToplam)}</span></div>
+    ${iskontoOrani > 0 ? `<div><span>İskonto (%${iskontoOrani})</span><span>−${tl(iskontoTutar)}</span></div>` : ""}
     <div><span>KDV (%${kdvOrani})</span><span>${tl(kdvTutar)}</span></div>
     <div class="genel"><span>Genel Toplam</span><span>${tl(Number(teklif.toplam))}</span></div>
   </div>

@@ -3,7 +3,7 @@ import { yetki } from "@/lib/yetki";
 import { govdeDogrula, hata, ok, sayfalama } from "@/lib/api";
 import { teklifSemasi } from "@/lib/semalar";
 import { degisiklikOzeti, denetimKaydet } from "@/lib/denetim";
-import { teklifIliskileri, teklifTutarlari, type TeklifKalem } from "@/lib/teklif";
+import { teklifIliskileri, teklifTutarlari, type TeklifKalem, type TeklifOlay } from "@/lib/teklif";
 
 // GET /api/teklifler?durum=&satisFirsatiId=&sayfa=&limit= — teklif listesi
 // Teklifler satış fırsatına bağlı olduğundan "musteriler" izni ile erişilir.
@@ -45,7 +45,7 @@ export async function POST(istek: Request) {
 
   const sonuc = await govdeDogrula(istek, teklifSemasi);
   if (sonuc.yanit) return sonuc.yanit;
-  const { satisFirsatiId, onaylayanId, kalemler, kdvOrani, ...alanlar } = sonuc.veri;
+  const { satisFirsatiId, onaylayanId, kalemler, kdvOrani, iskontoOrani, ...alanlar } = sonuc.veri;
 
   // Fırsat bu firmaya ait mi?
   const firsat = await prisma.satisFirsati.findFirst({
@@ -61,7 +61,16 @@ export async function POST(istek: Request) {
   });
   if (!onaylayan) return hata("Onaya gönderilecek yönetici geçersiz");
 
-  const { araToplam, toplam } = teklifTutarlari(kalemler as TeklifKalem[], kdvOrani);
+  const { araToplam, toplam } = teklifTutarlari(kalemler as TeklifKalem[], kdvOrani, iskontoOrani);
+
+  // Geçmişin ilk olayı: teklif bu tutarla verildi
+  const ilkOlay: TeklifOlay = {
+    tip: "olusturma",
+    zaman: new Date().toISOString(),
+    kullaniciAd: y.kullanici.adSoyad,
+    toplam,
+    iskontoOrani,
+  };
 
   const teklif = await prisma.teklif.create({
     data: {
@@ -71,9 +80,11 @@ export async function POST(istek: Request) {
       olusturanId: y.kullanici.id,
       kalemler,
       kdvOrani,
+      iskontoOrani,
       araToplam,
       toplam,
       durum: "onay_bekliyor",
+      gecmis: [ilkOlay],
       ...alanlar,
     },
     include: teklifIliskileri,

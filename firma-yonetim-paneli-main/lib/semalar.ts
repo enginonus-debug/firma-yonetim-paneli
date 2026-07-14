@@ -328,9 +328,15 @@ export const teklifSemasi = z.object({
   baslik: z.string().min(1, "Teklif başlığı zorunlu"),
   kalemler: z.array(teklifKalemSemasi).min(1, "En az bir teklif kalemi girin"),
   kdvOrani: z.coerce.number().min(0).max(100).default(20),
+  iskontoOrani: z.coerce.number().min(0).max(100).default(0),
   gecerlilikTarihi: z.coerce.date().nullish(),
   notlar: z.string().nullish(),
   onaylayanId: idNo, // onayına gönderilecek yönetici (firma admini)
+});
+// Onaylı teklife müşteri iskontosu girme (revizyon): teklif yeniden onaya düşer
+export const teklifIskontoSemasi = z.object({
+  iskontoOrani: z.coerce.number().min(0).max(100),
+  aciklama: z.string().nullish(), // revize gerekçesi (isteğe bağlı)
 });
 // Yönetici kararı: ret için açıklama zorunlu
 export const teklifKararSemasi = z

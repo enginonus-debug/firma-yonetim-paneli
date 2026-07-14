@@ -20,6 +20,16 @@ import { etiketSinifi, girdiSinifi, para, tarihGoster } from "@/lib/format";
 type Kalem = { aciklama: string; miktar: number; birim: string; birimFiyat: number };
 type Ek = { id: number; dosyaAd: string; mimeTip: string; boyut: number };
 
+// Teklif geçmişi olayı: verilen tutar, revizyonlar ve kararlar buradan izlenir
+type Olay = {
+  tip: "olusturma" | "revize" | "onay" | "ret";
+  zaman: string;
+  kullaniciAd: string;
+  toplam: number;
+  iskontoOrani: number;
+  aciklama?: string | null;
+};
+
 type Teklif = {
   id: number;
   baslik: string;
@@ -27,6 +37,9 @@ type Teklif = {
   araToplam: string;
   toplam: string;
   kdvOrani: string;
+  iskontoOrani: string;
+  revizyonNo: number;
+  gecmis: Olay[] | null;
   kalemler: Kalem[];
   notlar: string | null;
   gecerlilikTarihi: string | null;
@@ -51,6 +64,7 @@ type FormVerisi = {
   baslik: string;
   kalemler: Kalem[];
   kdvOrani: string;
+  iskontoOrani: string;
   gecerlilikTarihi: string;
   notlar: string;
   onaylayanId: string;
@@ -62,6 +76,7 @@ const bosForm: FormVerisi = {
   baslik: "",
   kalemler: [{ ...bosKalem }],
   kdvOrani: "20",
+  iskontoOrani: "0",
   gecerlilikTarihi: "",
   notlar: "",
   onaylayanId: "",
@@ -87,6 +102,7 @@ export default function TekliflerSayfasi() {
   const [yukleniyor, setYukleniyor] = useState(true);
   const [hata, setHata] = useState("");
   const [rol, setRol] = useState("");
+  const [benId, setBenId] = useState<number | null>(null);
 
   const [firsatlar, setFirsatlar] = useState<Firsat[]>([]);
   const [yoneticiler, setYoneticiler] = useState<Yonetici[]>([]);
@@ -125,7 +141,11 @@ export default function TekliflerSayfasi() {
   useEffect(() => {
     fetch("/api/hesap")
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => j && setRol(j.rol))
+      .then((j) => {
+        if (!j) return;
+        setRol(j.rol);
+        setBenId(j.id);
+      })
       .catch(() => {});
   }, []);
 
@@ -165,6 +185,7 @@ export default function TekliflerSayfasi() {
       baslik: t.baslik,
       kalemler: t.kalemler.map((k) => ({ ...k })),
       kdvOrani: String(Number(t.kdvOrani)),
+      iskontoOrani: String(Number(t.iskontoOrani)),
       gecerlilikTarihi: t.gecerlilikTarihi?.slice(0, 10) ?? "",
       notlar: t.notlar ?? "",
       onaylayanId: t.onaylayan ? String(t.onaylayan.id) : "",
@@ -195,7 +216,10 @@ export default function TekliflerSayfasi() {
   const formAraToplam = form
     ? form.kalemler.reduce((t, k) => t + (k.miktar || 0) * (k.birimFiyat || 0), 0)
     : 0;
-  const formToplam = form ? formAraToplam * (1 + (Number(form.kdvOrani) || 0) / 100) : 0;
+  const formIskonto = form ? (formAraToplam * (Number(form.iskontoOrani) || 0)) / 100 : 0;
+  const formToplam = form
+    ? (formAraToplam - formIskonto) * (1 + (Number(form.kdvOrani) || 0) / 100)
+    : 0;
 
   async function kaydet(e: React.FormEvent) {
     e.preventDefault();
@@ -213,6 +237,7 @@ export default function TekliflerSayfasi() {
         birimFiyat: Number(k.birimFiyat),
       })),
       kdvOrani: Number(form.kdvOrani),
+      iskontoOrani: Number(form.iskontoOrani) || 0,
       gecerlilikTarihi: form.gecerlilikTarihi || null,
       notlar: form.notlar.trim() || null,
       onaylayanId: form.onaylayanId ? Number(form.onaylayanId) : null,
@@ -384,6 +409,14 @@ export default function TekliflerSayfasi() {
                       >
                         {d?.etiket ?? t.durum}
                       </span>
+                      {t.revizyonNo > 0 && (
+                        <span
+                          className="ml-1.5 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700"
+                          title={`Bu teklif ${t.revizyonNo} kez revize edildi (iskonto)`}
+                        >
+                          Revize {t.revizyonNo}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
@@ -412,13 +445,17 @@ export default function TekliflerSayfasi() {
                             <Pencil size={16} />
                           </button>
                         )}
-                        <button
-                          onClick={() => sil(t)}
-                          title="Sil"
-                          className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {(t.durum === "onay_bekliyor" ||
+                          benId === t.olusturan?.id ||
+                          benId === t.onaylayan?.id) && (
+                          <button
+                            onClick={() => sil(t)}
+                            title="Sil"
+                            className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -587,7 +624,7 @@ export default function TekliflerSayfasi() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
               <div>
                 <label htmlFor="tKdv" className={etiketSinifi}>
                   KDV (%)
@@ -600,6 +637,21 @@ export default function TekliflerSayfasi() {
                   step="0.01"
                   value={form.kdvOrani}
                   onChange={(e) => setForm({ ...form, kdvOrani: e.target.value })}
+                  className={girdiSinifi}
+                />
+              </div>
+              <div>
+                <label htmlFor="tIskonto" className={etiketSinifi}>
+                  İskonto (%)
+                </label>
+                <input
+                  id="tIskonto"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={form.iskontoOrani}
+                  onChange={(e) => setForm({ ...form, iskontoOrani: e.target.value })}
                   className={girdiSinifi}
                 />
               </div>
@@ -621,6 +673,12 @@ export default function TekliflerSayfasi() {
                     <span>Ara Toplam</span>
                     <span>{para.format(formAraToplam)}</span>
                   </div>
+                  {formIskonto > 0 && (
+                    <div className="mt-1 flex justify-between text-slate-500">
+                      <span>İskonto</span>
+                      <span>−{para.format(formIskonto)}</span>
+                    </div>
+                  )}
                   <div className="mt-1 flex justify-between font-semibold text-slate-800">
                     <span>Genel Toplam</span>
                     <span>{para.format(formToplam)}</span>
@@ -728,6 +786,7 @@ export default function TekliflerSayfasi() {
         <TeklifDetay
           teklif={detay}
           rol={rol}
+          benId={benId}
           kapat={() => setDetay(null)}
           tazele={() => detayTazele(detay.id)}
         />
@@ -736,24 +795,35 @@ export default function TekliflerSayfasi() {
   );
 }
 
-// ---- Teklif detay modalı: kalemler, ekler, karar ----
+// ---- Teklif detay modalı: kalemler, ekler, karar, iskonto/revizyon, geçmiş ----
 function TeklifDetay({
   teklif,
   rol,
+  benId,
   kapat,
   tazele,
 }: {
   teklif: Teklif;
   rol: string;
+  benId: number | null;
   kapat: () => void;
   tazele: () => void;
 }) {
   const [yukleniyor, setYukleniyor] = useState(false);
   const [kararNotu, setKararNotu] = useState("");
   const [islemHata, setIslemHata] = useState("");
+  const [iskontoGiris, setIskontoGiris] = useState("");
   const d = durumlar.find((x) => x.deger === teklif.durum);
   const onayBekliyor = teklif.durum === "onay_bekliyor";
+  const onaylandi = teklif.durum === "onaylandi";
   const yonetici = rol === "admin";
+  // İskonto (revizyon) yalnızca teklifi oluşturan veya onaylayan tarafından girilebilir
+  const iskontoGirebilir =
+    onaylandi && (benId === teklif.olusturan?.id || benId === teklif.onaylayan?.id);
+  const iskontoOrani = Number(teklif.iskontoOrani);
+  const araToplamSayi = Number(teklif.araToplam);
+  const iskontoTutar = (araToplamSayi * iskontoOrani) / 100;
+  const kdvTutar = Number(teklif.toplam) - (araToplamSayi - iskontoTutar);
 
   async function ekYukle(e: React.ChangeEvent<HTMLInputElement>) {
     const dosya = e.target.files?.[0];
@@ -777,6 +847,36 @@ function TeklifDetay({
     const r = await fetch(`/api/teklifler/${teklif.id}/ekler/${ek.id}`, { method: "DELETE" });
     if (r.ok) tazele();
     else setIslemHata("Ek silinemedi");
+  }
+
+  // Onaylı teklife müşteri iskontosu girer; teklif yeniden onaya düşer (revizyon)
+  async function iskontoGonder() {
+    const oran = Number(iskontoGiris);
+    if (!iskontoGiris.trim() || Number.isNaN(oran) || oran < 0 || oran > 100) {
+      setIslemHata("0–100 arası bir iskonto oranı girin");
+      return;
+    }
+    if (
+      !window.confirm(
+        `%${oran} iskonto girilecek ve teklif yeniden yönetici onayına gönderilecek. Devam edilsin mi?`
+      )
+    )
+      return;
+    setYukleniyor(true);
+    setIslemHata("");
+    const r = await fetch(`/api/teklifler/${teklif.id}/iskonto`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ iskontoOrani: oran }),
+    });
+    setYukleniyor(false);
+    if (r.ok) {
+      setIskontoGiris("");
+      tazele();
+    } else {
+      const j = await r.json().catch(() => null);
+      setIslemHata(j?.hata ?? "İskonto girilemedi");
+    }
   }
 
   async function karar(karar: "onayla" | "reddet") {
@@ -808,6 +908,11 @@ function TeklifDetay({
           >
             {d?.etiket ?? teklif.durum}
           </span>
+          {teklif.revizyonNo > 0 && (
+            <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700">
+              Revize {teklif.revizyonNo} · İskonto %{iskontoOrani}
+            </span>
+          )}
           <span className="text-slate-500">
             {teklif.satisFirsati.musteri.ad} · {teklif.satisFirsati.baslik ?? "—"}
           </span>
@@ -854,15 +959,21 @@ function TeklifDetay({
                 <td colSpan={3} className="px-3 py-1.5 text-right">
                   Ara Toplam
                 </td>
-                <td className="px-3 py-1.5 text-right">{para.format(Number(teklif.araToplam))}</td>
+                <td className="px-3 py-1.5 text-right">{para.format(araToplamSayi)}</td>
               </tr>
+              {iskontoOrani > 0 && (
+                <tr className="text-slate-500">
+                  <td colSpan={3} className="px-3 py-1.5 text-right">
+                    İskonto (%{iskontoOrani})
+                  </td>
+                  <td className="px-3 py-1.5 text-right">−{para.format(iskontoTutar)}</td>
+                </tr>
+              )}
               <tr className="text-slate-500">
                 <td colSpan={3} className="px-3 py-1.5 text-right">
                   KDV (%{Number(teklif.kdvOrani)})
                 </td>
-                <td className="px-3 py-1.5 text-right">
-                  {para.format(Number(teklif.toplam) - Number(teklif.araToplam))}
-                </td>
+                <td className="px-3 py-1.5 text-right">{para.format(kdvTutar)}</td>
               </tr>
               <tr className="border-t border-slate-200 font-semibold text-slate-800">
                 <td colSpan={3} className="px-3 py-2 text-right">
@@ -893,22 +1004,25 @@ function TeklifDetay({
             <p className="font-medium text-slate-700">
               Ekler (reçete / maliyet belgeleri)
             </p>
-            <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50">
-              <Upload size={14} />
-              Dosya Ekle
-              <input
-                type="file"
-                className="hidden"
-                accept=".png,.jpg,.jpeg,.webp,.pdf,.xml,.doc,.docx,.xls,.xlsx"
-                onChange={ekYukle}
-                disabled={yukleniyor}
-              />
-            </label>
+            {onayBekliyor && (
+              <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50">
+                <Upload size={14} />
+                Dosya Ekle
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".png,.jpg,.jpeg,.webp,.pdf,.xml,.doc,.docx,.xls,.xlsx"
+                  onChange={ekYukle}
+                  disabled={yukleniyor}
+                />
+              </label>
+            )}
           </div>
           {teklif.ekler.length === 0 ? (
             <p className="rounded-lg border-2 border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
-              Henüz ek yok. Reçete görüntüsü veya maliyet dosyası (pdf, xml, doc, docx, xls)
-              ekleyin.
+              {onayBekliyor
+                ? "Henüz ek yok. Reçete görüntüsü veya maliyet dosyası (pdf, xml, doc, docx, xls) ekleyin."
+                : "Bu teklifte ek yok."}
             </p>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -928,13 +1042,15 @@ function TeklifDetay({
                   >
                     <Download size={15} />
                   </a>
-                  <button
-                    onClick={() => ekSil(ek)}
-                    className="rounded p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                    title="Sil"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  {onayBekliyor && (
+                    <button
+                      onClick={() => ekSil(ek)}
+                      className="rounded p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600"
+                      title="Sil"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -952,6 +1068,46 @@ function TeklifDetay({
           >
             <p className="text-xs font-medium">Yönetici Notu</p>
             <p>{teklif.kararNotu}</p>
+          </div>
+        )}
+
+        {!onayBekliyor && (
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            Bu teklif karara bağlandı: içeriği ve ekleri artık değiştirilemez. Teklifi
+            yalnızca oluşturan veya onaylayan kişi silebilir.
+            {onaylandi &&
+              " Tek istisna müşteri iskontosudur: iskonto girilirse teklif yeniden onaya düşer."}
+          </p>
+        )}
+
+        {/* Müşteri iskontosu (revizyon) — yalnızca onaylı teklifte, oluşturan/onaylayana açık */}
+        {iskontoGirebilir && (
+          <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-3">
+            <p className="mb-1 font-medium text-slate-700">Müşteri İskontosu (Revizyon)</p>
+            <p className="mb-2 text-xs text-slate-500">
+              Müşteri iskonto isterse oranı girin; teklif tutarı yeniden hesaplanır ve teklif
+              tekrar yönetici onayına gönderilir.
+              {iskontoOrani > 0 && ` Mevcut iskonto: %${iskontoOrani}.`}
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={iskontoGiris}
+                onChange={(e) => setIskontoGiris(e.target.value)}
+                className="w-32 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-violet-500"
+                placeholder="İskonto %"
+              />
+              <button
+                onClick={iskontoGonder}
+                disabled={yukleniyor}
+                className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-60"
+              >
+                İskonto Gir ve Onaya Gönder
+              </button>
+            </div>
           </div>
         )}
 
@@ -990,6 +1146,37 @@ function TeklifDetay({
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
             Bu teklif {teklif.onaylayan?.adSoyad ?? "yönetici"} onayını bekliyor.
           </p>
+        )}
+
+        {/* Teklif geçmişi: ne teklif verildi, nasıl revize edildi, kararlar */}
+        {(teklif.gecmis?.length ?? 0) > 0 && (
+          <div>
+            <p className="mb-2 font-medium text-slate-700">Teklif Geçmişi</p>
+            <ol className="space-y-1.5 border-l-2 border-slate-200 pl-4">
+              {teklif.gecmis!.map((o, i) => {
+                const etiket = {
+                  olusturma: { ad: "Teklif verildi", renk: "text-sky-700" },
+                  revize: { ad: `Revize edildi — iskonto %${o.iskontoOrani}`, renk: "text-violet-700" },
+                  onay: { ad: "Onaylandı", renk: "text-emerald-700" },
+                  ret: { ad: "Reddedildi", renk: "text-red-600" },
+                }[o.tip] ?? { ad: o.tip, renk: "text-slate-600" };
+                return (
+                  <li key={i} className="relative text-xs">
+                    <span className="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-slate-300" />
+                    <span className={`font-medium ${etiket.renk}`}>{etiket.ad}</span>{" "}
+                    <span className="text-slate-500">
+                      · {para.format(o.toplam)} · {o.kullaniciAd} ·{" "}
+                      {new Date(o.zaman).toLocaleString("tr-TR", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                    </span>
+                    {o.aciklama && <p className="text-slate-400">{o.aciklama}</p>}
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
         )}
 
         {islemHata && (

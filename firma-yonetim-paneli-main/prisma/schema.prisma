@@ -283,8 +283,13 @@ model Teklif {
   // Teklif şablonu satırları: [{ aciklama, miktar, birim, birimFiyat }]
   kalemler         Json
   kdvOrani         Decimal      @default(20) @db.Decimal(5, 2)
+  // Müşteri iskontosu (%): onaylı teklife girilirse teklif yeniden onaya düşer (revizyon)
+  iskontoOrani     Decimal      @default(0) @db.Decimal(5, 2)
   araToplam        Decimal      @db.Decimal(14, 2)
-  toplam           Decimal      @db.Decimal(14, 2) // KDV dahil genel toplam
+  toplam           Decimal      @db.Decimal(14, 2) // iskonto düşülmüş, KDV dahil genel toplam
+  revizyonNo       Int          @default(0) // kaç kez revize edildi (0 = hiç)
+  // Teklif geçmişi: [{ tip: olusturma|revize|onay|ret, zaman, kullaniciAd, toplam, iskontoOrani, aciklama }]
+  gecmis           Json?
   gecerlilikTarihi DateTime?    @db.Date
   notlar           String? // maliyet/reçete açıklamaları, onaya eşlik eden not
   durum            String       @default("onay_bekliyor") // onay_bekliyor | onaylandi | reddedildi
@@ -294,6 +299,10 @@ model Teklif {
   onaylayan        Kullanici?   @relation("TeklifOnaylayan", fields: [onaylayanId], references: [id])
   kararNotu        String? // yöneticinin onay/ret açıklaması
   kararZamani      DateTime?
+  // Karar anında dondurulan kopya: { firma, musteri, olusturanAd, onaylayanAd }.
+  // Karara bağlanmış teklifin çıktısı bu kopyadan beslenir; firma/müşteri
+  // bilgileri sonradan değişse bile onaylı teklif belgesini etkilemez.
+  anlikVeri        Json?
   olusturma        DateTime     @default(now())
   ekler            TeklifEki[]
 

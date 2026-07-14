@@ -45,9 +45,12 @@ export async function DELETE(_istek: Request, { params }: Baglam) {
 
   const ek = await prisma.teklifEki.findFirst({
     where: { id: ekId, teklifId: id, firmaId: y.firmaId },
-    select: { id: true, dosyaAd: true },
+    select: { id: true, dosyaAd: true, teklif: { select: { durum: true } } },
   });
   if (!ek) return hata("Ek bulunamadı", 404);
+  if (ek.teklif.durum !== "onay_bekliyor") {
+    return hata("Karara bağlanmış teklifin eki silinemez", 409);
+  }
 
   try {
     await prisma.teklifEki.delete({ where: { id: ekId } });

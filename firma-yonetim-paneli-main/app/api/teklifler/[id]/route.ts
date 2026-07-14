@@ -35,7 +35,7 @@ export async function PUT(istek: Request, { params }: Baglam) {
 
   const sonuc = await govdeDogrula(istek, teklifSemasi);
   if (sonuc.yanit) return sonuc.yanit;
-  const { satisFirsatiId, onaylayanId, kalemler, kdvOrani, ...alanlar } = sonuc.veri;
+  const { satisFirsatiId, onaylayanId, kalemler, kdvOrani, iskontoOrani, ...alanlar } = sonuc.veri;
 
   const eski = await prisma.teklif.findFirst({ where: { id, firmaId } });
   if (!eski) return hata("Teklif bulunamadı", 404);
@@ -49,12 +49,12 @@ export async function PUT(istek: Request, { params }: Baglam) {
   });
   if (!onaylayan) return hata("Onaya gönderilecek yönetici geçersiz");
 
-  const { araToplam, toplam } = teklifTutarlari(kalemler as TeklifKalem[], kdvOrani);
+  const { araToplam, toplam } = teklifTutarlari(kalemler as TeklifKalem[], kdvOrani, iskontoOrani);
 
   try {
     const teklif = await prisma.teklif.update({
       where: { id, firmaId },
-      data: { satisFirsatiId, onaylayanId, kalemler, kdvOrani, araToplam, toplam, ...alanlar },
+      data: { satisFirsatiId, onaylayanId, kalemler, kdvOrani, iskontoOrani, araToplam, toplam, ...alanlar },
       include: teklifIliskileri,
     });
     await denetimKaydet({
@@ -73,7 +73,9 @@ export async function PUT(istek: Request, { params }: Baglam) {
   }
 }
 
-// DELETE /api/teklifler/:id — teklifi siler (ekler cascade ile temizlenir)
+// DELETE /api/teklifler/:id — teklifi siler (ekler cascade ile temizlenir).
+// Karara bağlanmış (onaylı/reddedilmiş) teklifi yalnızca teklifi oluşturan
+// veya kararı veren (onaylayan) silebilir; başka kimse müdahale edemez.
 export async function DELETE(_istek: Request, { params }: Baglam) {
   const y = await yetki("musteriler", "yazma");
   if (y.yanit) return y.yanit;
@@ -84,6 +86,12 @@ export async function DELETE(_istek: Request, { params }: Baglam) {
 
   const eski = await prisma.teklif.findFirst({ where: { id, firmaId } });
   if (!eski) return hata("Teklif bulunamadı", 404);
+  if (eski.durum !== "onay_bekliyor") {
+    const silebilir = y.kullanici.id === eski.olusturanId || y.kullanici.id === eski.onaylayanId;
+    if (!silebilir) {
+      return hata("Karara bağlanmış teklifi yalnızca oluşturan veya onaylayan silebilir", 403);
+    }
+  }
 
   try {
     await prisma.teklif.delete({ where: { id, firmaId } });
