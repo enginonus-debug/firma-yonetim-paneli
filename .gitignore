@@ -1,0 +1,5 @@
+# yerel makineye özgü dosyalar
+.claude/settings.local.json
+
+# arşiv dosyaları
+*.zip

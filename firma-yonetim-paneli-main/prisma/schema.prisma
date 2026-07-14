@@ -1,0 +1,354 @@
+// Küçük üretim işletmeleri için yönetim paneli — veri modeli
+// Aşama 1: tek firma (single-tenant). Tüm tablolarda firmaId var (varsayılan: 1),
+// SaaS'a geçişte şema değişmeden sadece auth + sorgu filtrelemesi eklenecek.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  // Yalnızca `prisma migrate dev` kullanır (yerel Prisma Postgres bunu sağlıyor)
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+model Firma {
+  id      Int     @id @default(autoincrement())
+  ad      String
+  adres   String?
+  telefon String?
+  vergiNo String?
+  // Logo: küçültülmüş data-URL (PNG). Teklif ve resmi belge çıktılarında kullanılır.
+  logo    String?
+  // Süper admin firmayı askıya alabilir; false ise firmanın tüm kullanıcıları kilitlenir
+  aktif   Boolean @default(true)
+}
+
+// Panel kullanıcıları (giriş yapabilen hesaplar) — çalışanlardan ayrı tutulur
+// rol: superadmin (ürün sahibi, tüm firmaları yönetir)
+//      admin      (firma admini, kendi firmasında tam yetki + kullanıcı yönetimi)
+//      kullanici  (izinler alanındaki modül bazlı yetkilerle sınırlı)
+model Kullanici {
+  id        Int      @id @default(autoincrement())
+  firmaId   Int      @default(1)
+  email     String   @unique
+  adSoyad   String
+  sifreHash String
+  rol       String   @default("kullanici")
+  // Modül bazlı izin haritası: { "calisanlar": "yok" | "okuma" | "yazma", ... }
+  // Yalnızca rol=kullanici için anlamlı; admin/superadmin tam yetkili
+  izinler   Json?
+  aktif     Boolean  @default(true)
+  // Çalışanlar ekranından atanan hesaplar bir çalışana bağlıdır (bire bir)
+  calisanId Int?     @unique
+  calisan   Calisan? @relation("CalisanKullanici", fields: [calisanId], references: [id])
+  // Çalışandan atanan hesaplar admin onayına kadar "bekliyor" kalır ve giriş yapamaz
+  onayDurumu String  @default("onaylandi") // onaylandi | bekliyor
+  olusturma DateTime @default(now())
+  gorevAtamalari      GorevAtama[]
+  olusturduguGorevler Gorev[]     @relation("GorevOlusturan")
+  olusturduguTeklifler Teklif[]    @relation("TeklifOlusturan")
+  onayindakiTeklifler  Teklif[]    @relation("TeklifOnaylayan")
+  takvimNotlari        TakvimNotu[]
+  bildirimler          Bildirim[]
+
+  @@index([firmaId])
+}
+
+// Kullanıcıya giden uyarı/bildirim. Görev atandığında, onaya düştüğünde,
+// reddedildiğinde veya tamamlandığında oluşturulur; panelde görünür.
+// gorevId varsa bildirime tıklanınca o görev açılır.
+model Bildirim {
+  id          Int       @id @default(autoincrement())
+  firmaId     Int       @default(1)
+  kullaniciId Int
+  kullanici   Kullanici @relation(fields: [kullaniciId], references: [id], onDelete: Cascade)
+  tip         String // atama | kontrol_bekliyor | denetim_bekliyor | tamamlandi | reddedildi
+  mesaj       String
+  gorevId     Int? // ilişkili görev (tıklanınca açılır)
+  okundu      Boolean   @default(false)
+  olusturma   DateTime  @default(now())
+
+  @@index([kullaniciId, okundu, olusturma])
+}
+
+// Kişisel takvim notu: kullanıcının belirli bir güne eklediği hatırlatma.
+// Notlar kullanıcıya özeldir; panelde o günün notu görünür.
+model TakvimNotu {
+  id          Int       @id @default(autoincrement())
+  firmaId     Int       @default(1)
+  kullaniciId Int
+  kullanici   Kullanici @relation(fields: [kullaniciId], references: [id], onDelete: Cascade)
+  tarih       DateTime  @db.Date
+  metin       String
+  olusturma   DateTime  @default(now())
+
+  @@index([kullaniciId, tarih])
+}
+
+model Calisan {
+  id              Int            @id @default(autoincrement())
+  firmaId         Int            @default(1)
+  adSoyad         String
+  tcKimlikNo      String?
+  dogumTarihi     DateTime?      @db.Date
+  cinsiyet        String? // erkek | kadin
+  pozisyon        String?
+  telefon         String?
+  il              String? // ikametin ili (filtreleme için)
+  ilce            String? // ikametin ilçesi
+  adres           String? // ikamet bilgisi (açık adres)
+  acilTelefon     String? // ulaşılamazsa / acil durumda aranacak yakını
+  iseBaslama      DateTime?      @db.Date
+  istenAyrilma    DateTime?      @db.Date // aktif=false yapılırken zorunlu
+  maas            Decimal?       @db.Decimal(12, 2)
+  engelli         Boolean        @default(false)
+  engelDurumu     String? // engelli=true ise zorunlu
+  foto            String? // küçültülmüş data-URL (yalnızca detay uçından döner)
+  aktif           Boolean        @default(true)
+  devamKayitlari  Devam[]
+  satisFirsatlari SatisFirsati[]
+  sorumluMakineler Makine[]      @relation("MakineSorumlusu")
+  makineOlaylari   MakineOlay[]  @relation("MakineOlaySorumlusu")
+  kullanici        Kullanici?    @relation("CalisanKullanici")
+
+  @@index([firmaId, aktif])
+}
+
+model Makine {
+  id        Int      @id @default(autoincrement())
+  firmaId   Int      @default(1)
+  ad        String
+  model     String?
+  seriNo    String?
+  durum     String   @default("calisiyor") // calisiyor | bakimda | arizali
+  sorumluId Int?
+  sorumlu   Calisan? @relation("MakineSorumlusu", fields: [sorumluId], references: [id])
+  durumNotu String? // bakımda/arızalıysa sorumlunun ne bakımı/arızası olduğu notu
+  gorevler  Gorev[]
+  olaylar   MakineOlay[]
+
+  @@index([firmaId])
+}
+
+// Bakım/arıza geçmişi: makine bakıma alınınca veya arızalanınca açılır,
+// tekrar çalışır duruma gelince kapanır (bitis dolar)
+model MakineOlay {
+  id        Int       @id @default(autoincrement())
+  firmaId   Int       @default(1)
+  makineId  Int
+  makine    Makine    @relation(fields: [makineId], references: [id], onDelete: Cascade)
+  tip       String // bakim | ariza
+  aciklama  String
+  sorumluId Int?
+  sorumlu   Calisan?  @relation("MakineOlaySorumlusu", fields: [sorumluId], references: [id])
+  baslangic DateTime  @default(now())
+  bitis     DateTime? // null = hâlâ bakımda/arızalı
+
+  @@index([firmaId, makineId, baslangic])
+}
+
+model Devam {
+  id        Int      @id @default(autoincrement())
+  firmaId   Int      @default(1)
+  calisanId Int
+  calisan   Calisan  @relation(fields: [calisanId], references: [id])
+  tarih     DateTime @db.Date
+  girisSaat String? // "08:30" biçiminde
+  cikisSaat String?
+  durum     String // geldi | gelmedi | izinli
+
+  @@unique([calisanId, tarih]) // aynı güne tek kayıt
+  @@index([firmaId, tarih])
+}
+
+model Gorev {
+  id        Int       @id @default(autoincrement())
+  firmaId   Int       @default(1)
+  makineId  Int?
+  makine    Makine?   @relation(fields: [makineId], references: [id])
+  baslik    String
+  aciklama  String?
+  // İş akışı durumu: bekliyor → devam_ediyor → (kontrol_bekliyor →)
+  // (denetim_bekliyor →) tamamlandi. Kontrolör/denetçi yoksa o aşama atlanır.
+  durum     String    @default("bekliyor")
+  oncelik   String? // dusuk | normal | yuksek
+  baslangic DateTime? @db.Date
+  bitis     DateTime? @db.Date
+  // Görevi oluşturan (atayan) kullanıcı — kısıtlı alanları yalnızca o düzenler,
+  // görev tamamlanınca ona bildirim gider
+  olusturanId Int?
+  olusturan   Kullanici? @relation("GorevOlusturan", fields: [olusturanId], references: [id])
+  redNotu     String? // kontrolör/denetçi reddettiğinde yazılan açıklama
+  olusturma DateTime  @default(now())
+  // Görev yalnızca panel kullanıcılarına atanır (giriş bilgisi olmayan
+  // çalışanlara atanamaz); birden fazla atanan + denetçi + kontrolör olabilir
+  atamalar  GorevAtama[]
+  ekler     GorevEki[]
+
+  @@index([firmaId, durum])
+}
+
+// Görev eki: görev oluştururken eklenen belge (tur="gorev") veya görevi
+// tamamlayanın eklediği sonuç/çıktı belgesi (tur="sonuc"). Reçete görüntüsü
+// veya pdf/doc/docx/xls/xml biçiminde dosya. İçerik veritabanında tutulur.
+model GorevEki {
+  id         Int      @id @default(autoincrement())
+  firmaId    Int      @default(1)
+  gorevId    Int
+  gorev      Gorev    @relation(fields: [gorevId], references: [id], onDelete: Cascade)
+  tur        String   @default("gorev") // gorev | sonuc
+  dosyaAd    String
+  mimeTip    String
+  boyut      Int
+  veri       Bytes
+  yukleyenId Int? // yükleyen kullanıcı (iz için; ilişki yok)
+  yukleyenAd String?
+  olusturma  DateTime @default(now())
+
+  @@index([gorevId])
+}
+
+// Görev ↔ kullanıcı ataması. rol alanı kişinin görevdeki sıfatını belirtir.
+model GorevAtama {
+  id          Int       @id @default(autoincrement())
+  gorevId     Int
+  gorev       Gorev     @relation(fields: [gorevId], references: [id], onDelete: Cascade)
+  kullaniciId Int
+  kullanici   Kullanici @relation(fields: [kullaniciId], references: [id], onDelete: Cascade)
+  rol         String    @default("atanan") // atanan | denetci | kontrolor
+
+  @@unique([gorevId, kullaniciId, rol])
+  @@index([kullaniciId])
+}
+
+model Musteri {
+  id              Int            @id @default(autoincrement())
+  firmaId         Int            @default(1)
+  ad              String
+  telefon         String?
+  // Yabancı müşteri için ülke arama kodu (ör. "+90", "+49"); yerel müşteride "+90"
+  ulkeKodu        String         @default("+90")
+  email           String?
+  adres           String?
+  vergiNo         String?
+  // Müşteri firmasındaki yetkili/irtibat kişisi bilgileri
+  yetkiliAd       String?
+  yetkiliUnvan    String?
+  yetkiliTelefon  String?
+  yetkiliEmail    String?
+  // Firma hakkında önemli notlar (temsilci değişince yeni kişiye devir bilgisi)
+  notlar          String?
+  olusturma       DateTime       @default(now())
+  satisFirsatlari SatisFirsati[]
+  tahsilatlar     Tahsilat[]
+
+  @@index([firmaId])
+}
+
+model SatisFirsati {
+  id          Int        @id @default(autoincrement())
+  firmaId     Int        @default(1)
+  musteriId   Int
+  musteri     Musteri    @relation(fields: [musteriId], references: [id])
+  sorumluId   Int?
+  sorumlu     Calisan?   @relation(fields: [sorumluId], references: [id])
+  baslik      String? // ör: "20 masa siparişi"
+  durum       String     @default("potansiyel") // potansiyel | gorusuluyor | kazanildi | kaybedildi
+  tutar       Decimal?   @db.Decimal(12, 2)
+  tarih       DateTime?  @db.Date
+  // Fırsat kaybedildiyse ilgili satışçının yazdığı olumsuz sonuç nedeni (zorunlu)
+  kayipNedeni String?
+  olusturma   DateTime   @default(now())
+  tahsilatlar Tahsilat[]
+  teklifler   Teklif[]
+
+  @@index([firmaId, durum])
+}
+
+// Fiyat teklifi: satış fırsatından üretilir, yönetici (admin) onayına gönderilir.
+// Onaylanınca müşteriye verilebilir hâle gelir ve yazdırılabilir/PDF çıkarılabilir.
+// Kalemler, ekler ve notlar fırsat kazanılsa da kaybedilse de erişilebilir kalır.
+model Teklif {
+  id               Int          @id @default(autoincrement())
+  firmaId          Int          @default(1)
+  satisFirsatiId   Int
+  satisFirsati     SatisFirsati @relation(fields: [satisFirsatiId], references: [id])
+  baslik           String
+  // Teklif şablonu satırları: [{ aciklama, miktar, birim, birimFiyat }]
+  kalemler         Json
+  kdvOrani         Decimal      @default(20) @db.Decimal(5, 2)
+  araToplam        Decimal      @db.Decimal(14, 2)
+  toplam           Decimal      @db.Decimal(14, 2) // KDV dahil genel toplam
+  gecerlilikTarihi DateTime?    @db.Date
+  notlar           String? // maliyet/reçete açıklamaları, onaya eşlik eden not
+  durum            String       @default("onay_bekliyor") // onay_bekliyor | onaylandi | reddedildi
+  olusturanId      Int?
+  olusturan        Kullanici?   @relation("TeklifOlusturan", fields: [olusturanId], references: [id])
+  onaylayanId      Int?
+  onaylayan        Kullanici?   @relation("TeklifOnaylayan", fields: [onaylayanId], references: [id])
+  kararNotu        String? // yöneticinin onay/ret açıklaması
+  kararZamani      DateTime?
+  olusturma        DateTime     @default(now())
+  ekler            TeklifEki[]
+
+  @@index([firmaId, durum])
+  @@index([satisFirsatiId])
+}
+
+// Teklif eki: reçete görüntüsü veya xml/doc/docx/pdf/xls biçiminde maliyet dosyası.
+// Dosya içeriği veritabanında tutulur; liste uçları yalnızca üst bilgiyi döner.
+model TeklifEki {
+  id        Int      @id @default(autoincrement())
+  firmaId   Int      @default(1)
+  teklifId  Int
+  teklif    Teklif   @relation(fields: [teklifId], references: [id], onDelete: Cascade)
+  dosyaAd   String
+  mimeTip   String
+  boyut     Int
+  veri      Bytes
+  olusturma DateTime @default(now())
+
+  @@index([teklifId])
+}
+
+// Denetim kaydı (audit log): panelde yapılan her değişikliğin ayak izi.
+// Kayıtlar hiçbir uçtan silinemez/değiştirilemez; yalnızca admin görüntüler.
+// Kullanıcı adı/e-postası anlık kopya (snapshot) olarak tutulur ki kullanıcı
+// silinse veya adı değişse bile "kim yaptı" bilgisi kaybolmasın.
+model DenetimKaydi {
+  id             Int      @id @default(autoincrement())
+  firmaId        Int      @default(1)
+  kullaniciId    Int? // kayıt anındaki kullanıcı (ilişki yok: kullanıcı silinse de iz kalır)
+  kullaniciAd    String // adSoyad anlık kopyası
+  kullaniciEmail String // giriş yapılan hesap (oturum sahibi) anlık kopyası
+  kullaniciRol   String // oturumun rolü (superadmin | admin | kullanici)
+  ekran          String // hangi ekran: calisanlar | makineler | devam | ...
+  islem          String // ekleme | guncelleme | silme | pasife-alma | ozel-bilgi-goruntuleme | sifre-degistirme
+  hedefTip       String? // etkilenen kayıt türü, ör. "Çalışan"
+  hedefId        Int? // etkilenen kaydın id'si
+  hedefAd        String? // etkilenen kaydın adı/etiketi, ör. "Ahmet Yılmaz"
+  detay          Json? // değişen alanlar: { alan: { eski, yeni } } (hassas alanlar maskeli)
+  zaman          DateTime @default(now())
+
+  @@index([firmaId, zaman])
+}
+
+model Tahsilat {
+  id             Int           @id @default(autoincrement())
+  firmaId        Int           @default(1)
+  musteriId      Int
+  musteri        Musteri       @relation(fields: [musteriId], references: [id])
+  satisFirsatiId Int?
+  satisFirsati   SatisFirsati? @relation(fields: [satisFirsatiId], references: [id])
+  tutar          Decimal       @db.Decimal(12, 2)
+  vadeTarihi     DateTime?     @db.Date
+  odemeTarihi    DateTime?     @db.Date
+  durum          String        @default("bekliyor") // bekliyor | tahsil_edildi | gecikti
+  odemeYontemi   String? // nakit | havale | cek | kredi_karti
+  olusturma      DateTime      @default(now())
+
+  @@index([firmaId, durum])
+  @@index([firmaId, vadeTarihi])
+}

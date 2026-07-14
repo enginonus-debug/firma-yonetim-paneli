@@ -1,0 +1,24 @@
+# bağımlılıklar
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# üretim
+/build
+
+# ortam değişkenleri (gizli bilgiler)
+.env
+.env*.local
+
+# çeşitli
+.DS_Store
+*.pem
+npm-debug.log*
+*.tsbuildinfo
+next-env.d.ts
+
+# yerel makineye özgü dosyalar
+.claude/settings.local.json
+*.lnk
