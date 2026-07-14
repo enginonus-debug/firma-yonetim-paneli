@@ -181,6 +181,10 @@ model Gorev {
   olusturanId Int?
   olusturan   Kullanici? @relation("GorevOlusturan", fields: [olusturanId], references: [id])
   redNotu     String? // kontrolör/denetçi reddettiğinde yazılan açıklama
+  // İş akışındaki kişilerin göreve düştüğü notlar (görevli=atanan)
+  gorevliNotu   String?
+  kontrolorNotu String?
+  denetciNotu   String?
   olusturma DateTime  @default(now())
   // Görev yalnızca panel kullanıcılarına atanır (giriş bilgisi olmayan
   // çalışanlara atanamaz); birden fazla atanan + denetçi + kontrolör olabilir

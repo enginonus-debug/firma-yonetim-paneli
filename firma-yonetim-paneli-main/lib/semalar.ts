@@ -197,10 +197,13 @@ export const gorevDurumlari = [
 ] as const;
 export const gorevOncelikleri = ["dusuk", "normal", "yuksek"] as const;
 // İş akışı işlemleri: basla/tamamla (atanan) · onayla/reddet (kontrolör/denetçi)
-export const gorevIslemleri = ["basla", "tamamla", "onayla", "reddet"] as const;
+// · not_kaydet (görevli/kontrolör/denetçi kendi not alanını yazar)
+export const gorevIslemleri = ["basla", "tamamla", "onayla", "reddet", "not_kaydet"] as const;
+export const gorevNotAlanlari = ["gorevli", "kontrolor", "denetci"] as const;
 export const gorevIslemSemasi = z.object({
   islem: z.enum(gorevIslemleri),
-  not: z.string().nullish(), // reddetme açıklaması
+  not: z.string().max(2000, "Not en fazla 2000 karakter olabilir").nullish(), // reddetme açıklaması veya rol notu
+  alan: z.enum(gorevNotAlanlari).nullish(), // yalnızca not_kaydet için
 });
 export const gorevAtamaRolleri = ["atanan", "denetci", "kontrolor", "izleyici"] as const;
 export const gorevSemasi = z.object({

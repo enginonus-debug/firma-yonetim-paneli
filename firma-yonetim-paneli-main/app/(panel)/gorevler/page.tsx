@@ -41,6 +41,9 @@ type Gorev = {
   makine: { id: number; ad: string } | null;
   olusturan: { id: number; adSoyad: string } | null;
   redNotu: string | null;
+  gorevliNotu: string | null;
+  kontrolorNotu: string | null;
+  denetciNotu: string | null;
   atamalar: Atama[];
   ekler: Ek[];
 };
@@ -126,6 +129,12 @@ export default function GorevlerSayfasi() {
   const [ekler, setEkler] = useState<Ek[]>([]);
   const [ekHata, setEkHata] = useState("");
   const [ekMesgul, setEkMesgul] = useState(false);
+
+  // Rol notları (görevli / kontrolör / denetçi) — modal içinde düzenlenir
+  const [notlar, setNotlar] = useState({ gorevli: "", kontrolor: "", denetci: "" });
+  const [notMesgul, setNotMesgul] = useState<string | null>(null);
+  const [notKayitli, setNotKayitli] = useState<string | null>(null);
+  const [notHata, setNotHata] = useState("");
 
   const yukle = useCallback(async () => {
     setHata("");
@@ -250,6 +259,27 @@ export default function GorevlerSayfasi() {
     setFormHata("");
   }
 
+  // Rol notunu kaydet (yalnızca ilgili rol veya admin; sunucu da denetler)
+  async function notKaydet(alan: "gorevli" | "kontrolor" | "denetci") {
+    if (!duzenlenen) return;
+    setNotMesgul(alan);
+    setNotHata("");
+    const yanit = await fetch(`/api/gorevler/${duzenlenen.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ islem: "not_kaydet", alan, not: notlar[alan] }),
+    });
+    setNotMesgul(null);
+    if (yanit.ok) {
+      setNotKayitli(alan);
+      setTimeout(() => setNotKayitli(null), 2500);
+      yukle();
+    } else {
+      const j = await yanit.json().catch(() => null);
+      setNotHata(j?.hata ?? "Not kaydedilemedi");
+    }
+  }
+
   // Görevi aç: düzenleyebilenler için düzenleme, diğerleri için salt-okunur detay
   function ac(g: Gorev) {
     setDuzenlenen(g);
@@ -271,6 +301,12 @@ export default function GorevlerSayfasi() {
     setEkler(g.ekler ?? []);
     setEkHata("");
     setFormHata("");
+    setNotlar({
+      gorevli: g.gorevliNotu ?? "",
+      kontrolor: g.kontrolorNotu ?? "",
+      denetci: g.denetciNotu ?? "",
+    });
+    setNotHata("");
   }
 
   function kapat() {
@@ -464,7 +500,7 @@ export default function GorevlerSayfasi() {
                         <div className="flex items-start justify-between gap-2">
                           <button
                             onClick={() => ac(g)}
-                            className={`text-left text-sm font-medium hover:text-sky-700 ${
+                            className={`min-w-0 break-words text-left text-sm font-medium hover:text-sky-700 ${
                               g.durum === "tamamlandi" ? "text-slate-400 line-through" : "text-slate-800"
                             }`}
                           >
@@ -484,13 +520,13 @@ export default function GorevlerSayfasi() {
                         )}
 
                         {g.durum === "devam_ediyor" && g.redNotu && (
-                          <p className="mt-1.5 rounded-md bg-red-50 px-2 py-1 text-[11px] text-red-600">
+                          <p className="mt-1.5 whitespace-pre-wrap break-words rounded-md bg-red-50 px-2 py-1 text-[11px] text-red-600">
                             Reddedildi: {g.redNotu}
                           </p>
                         )}
 
                         {g.aciklama && (
-                          <p className="mt-1 line-clamp-2 text-xs text-slate-500">{g.aciklama}</p>
+                          <p className="mt-1 line-clamp-3 break-words text-xs text-slate-500">{g.aciklama}</p>
                         )}
 
                         <div className="mt-2 flex flex-col gap-1 text-xs text-slate-500">
@@ -529,23 +565,31 @@ export default function GorevlerSayfasi() {
                           </span>
                         </div>
 
-                        {/* İş akışı aksiyonları */}
-                        {akts.length > 0 && (
+                        {/* Kartta yalnızca "Başla" gösterilir; Tamamla/Onayla/Reddet
+                            bilinçli karar için görev detayının içinden yapılır */}
+                        {akts.some((a) => a.islem === "basla") && (
                           <div className="mt-2.5 flex flex-wrap gap-1.5">
-                            {akts.map((a) => (
-                              <button
-                                key={a.islem + a.etiket}
-                                onClick={() => islemYap(g, a.islem)}
-                                disabled={islemMesgul === g.id}
-                                className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-white transition-colors disabled:opacity-60 ${aksiyonSinifi(a.tur)}`}
-                              >
-                                {a.tur === "ilerle" && <Play size={12} />}
-                                {a.tur === "onay" && <CheckCircle2 size={12} />}
-                                {a.tur === "red" && <XCircle size={12} />}
-                                {a.etiket}
-                              </button>
-                            ))}
+                            {akts
+                              .filter((a) => a.islem === "basla")
+                              .map((a) => (
+                                <button
+                                  key={a.islem + a.etiket}
+                                  onClick={() => islemYap(g, a.islem)}
+                                  disabled={islemMesgul === g.id}
+                                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-white transition-colors disabled:opacity-60 ${aksiyonSinifi(a.tur)}`}
+                                >
+                                  <Play size={12} />
+                                  {a.etiket}
+                                </button>
+                              ))}
                           </div>
+                        )}
+                        {akts.some((a) => a.islem !== "basla") && (
+                          <p className="mt-2.5 rounded-md bg-sky-50 px-2 py-1 text-[11px] text-sky-700">
+                            {akts.some((a) => a.islem === "tamamla")
+                              ? "Tamamlamak için görevi açın"
+                              : "Onaylamak / reddetmek için görevi açın"}
+                          </p>
                         )}
 
                         <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
@@ -621,9 +665,61 @@ export default function GorevlerSayfasi() {
           )}
 
           {duzenlenen && duzenlenen.durum === "devam_ediyor" && duzenlenen.redNotu && (
-            <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+            <p className="mb-4 whitespace-pre-wrap break-words rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
               Reddedildi: {duzenlenen.redNotu}
             </p>
+          )}
+
+          {/* Rol notları: görevli / kontrolör / denetçi kendi notunu yazar,
+              diğerleri salt-okunur görür */}
+          {duzenlenen && (
+            <div className="mb-4 space-y-3 rounded-lg border border-slate-200 p-3">
+              <p className="text-sm font-medium text-slate-700">Notlar</p>
+              {(
+                [
+                  { alan: "gorevli", baslik: "Görevli Notu", izin: roluBul(duzenlenen).atanan },
+                  { alan: "kontrolor", baslik: "Kontrolör Notu", izin: roluBul(duzenlenen).kontrolor },
+                  { alan: "denetci", baslik: "Denetçi Notu", izin: roluBul(duzenlenen).denetci },
+                ] as const
+              ).map(({ alan, baslik, izin }) => {
+                const yazabilir = izin || adminMi;
+                return (
+                  <div key={alan}>
+                    <p className="mb-1 text-xs font-medium text-slate-500">{baslik}</p>
+                    {yazabilir ? (
+                      <div className="flex items-start gap-2">
+                        <textarea
+                          rows={2}
+                          value={notlar[alan]}
+                          onChange={(e) => setNotlar({ ...notlar, [alan]: e.target.value })}
+                          placeholder="Not ekleyin…"
+                          className={`${girdiSinifi} text-sm`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => notKaydet(alan)}
+                          disabled={notMesgul === alan}
+                          className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-60"
+                        >
+                          {notMesgul === alan
+                            ? "Kaydediliyor…"
+                            : notKayitli === alan
+                              ? "Kaydedildi ✓"
+                              : "Kaydet"}
+                        </button>
+                      </div>
+                    ) : notlar[alan] ? (
+                      <p className="whitespace-pre-wrap break-words rounded-md bg-slate-50 px-2.5 py-1.5 text-sm text-slate-700">
+                        {notlar[alan]}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-400">Not yok</p>
+                    )}
+                  </div>
+                );
+              })}
+              {notHata && <p className="text-xs text-red-600">{notHata}</p>}
+            </div>
           )}
 
           <form onSubmit={kaydet} className="space-y-4">
@@ -646,7 +742,7 @@ export default function GorevlerSayfasi() {
               <label htmlFor="aciklama" className={etiketSinifi}>Açıklama</label>
               <textarea
                 id="aciklama"
-                rows={2}
+                rows={4}
                 disabled={salt}
                 value={form.aciklama}
                 onChange={(e) => setForm({ ...form, aciklama: e.target.value })}

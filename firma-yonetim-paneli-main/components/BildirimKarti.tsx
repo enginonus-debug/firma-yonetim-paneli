@@ -1,7 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Bell, Check, CheckCircle2, ClipboardList, Eye, ShieldCheck, XCircle } from "lucide-react";
+import {
+  Bell,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ClipboardList,
+  Eye,
+  ShieldCheck,
+  XCircle,
+} from "lucide-react";
 
 type Bildirim = {
   id: number;
@@ -34,6 +43,8 @@ export default function BildirimKarti() {
   const [veriler, setVeriler] = useState<Bildirim[]>([]);
   const [okunmamis, setOkunmamis] = useState(0);
   const [yuklendi, setYuklendi] = useState(false);
+  // Okunan bildirimler panelde görünmez; başlığa tıklanınca geçmiş açılır
+  const [gecmisAcik, setGecmisAcik] = useState(false);
 
   const yukle = useCallback(async () => {
     try {
@@ -74,13 +85,19 @@ export default function BildirimKarti() {
     yukle();
   }
 
-  // Bildirim yoksa kartı hiç gösterme (paneli sade tutar)
+  // Hiç bildirim yoksa kartı hiç gösterme (paneli sade tutar)
   if (yuklendi && veriler.length === 0) return null;
+
+  const gosterilecek = gecmisAcik ? veriler : veriler.filter((b) => !b.okundu);
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between">
-        <h2 className="flex items-center gap-2 font-semibold text-slate-800">
+        <button
+          onClick={() => setGecmisAcik((a) => !a)}
+          title={gecmisAcik ? "Geçmişi gizle" : "Geçmiş bildirimleri göster"}
+          className="flex items-center gap-2 font-semibold text-slate-800 hover:text-sky-700"
+        >
           <span className="relative">
             <Bell size={18} className="text-sky-600" />
             {okunmamis > 0 && (
@@ -90,7 +107,11 @@ export default function BildirimKarti() {
             )}
           </span>
           Bildirimler
-        </h2>
+          <ChevronDown
+            size={15}
+            className={`text-slate-400 transition-transform ${gecmisAcik ? "rotate-180" : ""}`}
+          />
+        </button>
         {okunmamis > 0 && (
           <button
             onClick={hepsiniOku}
@@ -102,38 +123,47 @@ export default function BildirimKarti() {
         )}
       </div>
 
-      <ul className="mt-3 divide-y divide-slate-100">
-        {veriler.map((b) => {
-          const g = tipGorsel[b.tip] ?? { Ikon: Bell, renk: "text-slate-500" };
-          const Ikon = g.Ikon;
-          return (
-            <li key={b.id}>
-              <button
-                onClick={() => ac(b)}
-                className={`flex w-full items-start gap-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 ${
-                  b.okundu ? "opacity-60" : ""
-                }`}
-              >
-                <span className="relative mt-0.5 shrink-0">
-                  <Ikon size={17} className={g.renk} />
-                  {!b.okundu && (
-                    <span className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-sky-500" />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className={`block ${b.okundu ? "text-slate-500" : "font-medium text-slate-800"}`}>
-                    {b.mesaj}
+      {gosterilecek.length === 0 ? (
+        <p className="mt-3 text-xs text-slate-400">
+          Yeni bildiriminiz yok. Geçmiş bildirimleri görmek için &quot;Bildirimler&quot;
+          yazısına tıklayın.
+        </p>
+      ) : (
+        <ul className="mt-3 divide-y divide-slate-100">
+          {gosterilecek.map((b) => {
+            const g = tipGorsel[b.tip] ?? { Ikon: Bell, renk: "text-slate-500" };
+            const Ikon = g.Ikon;
+            return (
+              <li key={b.id}>
+                <button
+                  onClick={() => ac(b)}
+                  className={`flex w-full items-start gap-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 ${
+                    b.okundu ? "opacity-60" : ""
+                  }`}
+                >
+                  <span className="relative mt-0.5 shrink-0">
+                    <Ikon size={17} className={g.renk} />
+                    {!b.okundu && (
+                      <span className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-sky-500" />
+                    )}
                   </span>
-                  <span className="text-xs text-slate-400">{zamanGoster(b.olusturma)}</span>
-                </span>
-                {b.gorevId && (
-                  <span className="shrink-0 self-center text-xs text-sky-600">Aç →</span>
-                )}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={`block break-words ${b.okundu ? "text-slate-500" : "font-medium text-slate-800"}`}
+                    >
+                      {b.mesaj}
+                    </span>
+                    <span className="text-xs text-slate-400">{zamanGoster(b.olusturma)}</span>
+                  </span>
+                  {b.gorevId && (
+                    <span className="shrink-0 self-center text-xs text-sky-600">Aç →</span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }

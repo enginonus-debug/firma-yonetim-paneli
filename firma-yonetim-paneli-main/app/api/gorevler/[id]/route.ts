@@ -100,7 +100,7 @@ export async function PATCH(istek: Request, { params }: Baglam) {
 
   const sonuc = await govdeDogrula(istek, gorevIslemSemasi);
   if (sonuc.yanit) return sonuc.yanit;
-  const { islem, not } = sonuc.veri;
+  const { islem, not, alan } = sonuc.veri;
 
   const gorev = await prisma.gorev.findFirst({
     where: { id, firmaId },
@@ -113,6 +113,40 @@ export async function PATCH(istek: Request, { params }: Baglam) {
   const roller = new Set(
     gorev.atamalar.filter((a) => a.kullanici.id === uid).map((a) => a.rol)
   );
+
+  // Rol notu kaydetme: görevli (atanan) / kontrolör / denetçi yalnızca kendi
+  // not alanını yazabilir (admin hepsini yazabilir). Durum değişmez.
+  if (islem === "not_kaydet") {
+    if (!alan) return hata("Not alanı belirtilmeli");
+    const notAlanlari = {
+      gorevli: { veriAlani: "gorevliNotu", rol: "atanan", etiket: "Görevli notu" },
+      kontrolor: { veriAlani: "kontrolorNotu", rol: "kontrolor", etiket: "Kontrolör notu" },
+      denetci: { veriAlani: "denetciNotu", rol: "denetci", etiket: "Denetçi notu" },
+    } as const;
+    const secilen = notAlanlari[alan];
+    if (!admin && !roller.has(secilen.rol)) {
+      return hata("Bu notu yalnızca ilgili rol yazabilir", 403);
+    }
+    const yeniNot = not?.trim() || null;
+    const guncelGorev = await prisma.gorev.update({
+      where: { id, firmaId },
+      data: { [secilen.veriAlani]: yeniNot },
+      include: gorevIliskileri,
+    });
+    await denetimKaydet({
+      kullanici: y.kullanici,
+      ekran: "gorevler",
+      islem: "guncelleme",
+      hedefTip: "Görev",
+      hedefId: id,
+      hedefAd: gorev.baslik,
+      detay: degisiklikOzeti(
+        { [secilen.veriAlani]: gorev[secilen.veriAlani] },
+        { [secilen.veriAlani]: yeniNot }
+      ),
+    });
+    return ok(guncelGorev);
+  }
   const atananIdler = gorev.atamalar.filter((a) => a.rol === "atanan").map((a) => a.kullanici.id);
   const kontrolorIdler = gorev.atamalar.filter((a) => a.rol === "kontrolor").map((a) => a.kullanici.id);
   const denetciIdler = gorev.atamalar.filter((a) => a.rol === "denetci").map((a) => a.kullanici.id);
